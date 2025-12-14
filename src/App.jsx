@@ -1,21 +1,30 @@
 import React, { useState, useEffect, useMemo } from "react";
+import "./App.css";
 
 function App() {
-  // --- Variant 10 parametrləri (cədvəldən) ---
-  const l1 = 0.22; // l_AB
-  const l2 = 1.52; // l_BC
-  const l3 = 0.5;  // l_CD
-  const xd = 1.5;  // x
-  const yd = 0.2;  // y
-  const lBE = 0.5 * l2; // L_BE = 0.5 L_BC
-  const alf = (30 * Math.PI) / 180; // 30° radianla
+  // ---- Mexanizm parametrləri (input olaraq dəyişən) ----
+  const [l1, setL1] = useState(0.22);      // AB
+  const [l2, setL2] = useState(1.52);      // BC
+  const [l3, setL3] = useState(0.5);       // CD
+  const [xd, setXd] = useState(1.5);       // D-nin A-dan üfüqi məsafəsi
+  const [yd, setYd] = useState(0.2);       // D-nin A-dan şaquli məsafəsi
+  const [lBERatio, setLBERatio] = useState(0.5); // L_BE / L_BC
+  const [alfDeg, setAlfDeg] = useState(30);      // BE ilə BC arasındakı bucaq (dərəcə)
 
-  const [fi1Deg, setFi1Deg] = useState(30); // krank bucağı (dərəcə)
+  // ---- Krank bucağı və animasiya ----
+  const [fi1Deg, setFi1Deg] = useState(30);
   const [isPlaying, setIsPlaying] = useState(false);
   const [tracePoints, setTracePoints] = useState([]); // E nöqtəsinin trayektoriyası
 
-  // --- fi1 üçün kinematik hesab (C# kodundan port) ---
-  function computeConfiguration(fi1) {
+  // ---- fi1 üçün kinematik hesab (C# kodundan port) ----
+  function computeConfiguration(fi1, params) {
+    const { l1, l2, l3, xd, yd, lBERatio, alfDeg } = params;
+
+    if (l2 === 0 || l3 === 0) return null;
+
+    const lBE = lBERatio * l2;
+    const alf = (alfDeg * Math.PI) / 180;
+
     const csf = Math.cos(fi1);
     const snf = Math.sin(fi1);
 
@@ -63,9 +72,22 @@ function App() {
   }
 
   const fi1 = useMemo(() => (fi1Deg * Math.PI) / 180, [fi1Deg]);
-  const config = useMemo(() => computeConfiguration(fi1), [fi1]);
 
-  // --- Trayektoriyanın yığılması (E nöqtəsi) ---
+  const config = useMemo(
+    () =>
+      computeConfiguration(fi1, {
+        l1,
+        l2,
+        l3,
+        xd,
+        yd,
+        lBERatio,
+        alfDeg,
+      }),
+    [fi1, l1, l2, l3, xd, yd, lBERatio, alfDeg]
+  );
+
+  // ---- Trayektoriyanın yığılması (E nöqtəsi) ----
   useEffect(() => {
     if (!config) return;
     const { E } = config;
@@ -78,14 +100,14 @@ function App() {
     });
   }, [config]);
 
-  // --- Sadə animasiya (φ1 avtomatik dövsün) ---
+  // ---- Sadə animasiya (φ1 avtomatik dövsün) ----
   useEffect(() => {
     if (!isPlaying) return;
     let frameId;
 
     const step = () => {
       setFi1Deg((prev) => {
-        const next = prev + 2; // hər kadrda 2°
+        const next = prev + 0.5; // hər kadrda 2°
         return next >= 360 ? next - 360 : next;
       });
       frameId = requestAnimationFrame(step);
@@ -95,298 +117,400 @@ function App() {
     return () => cancelAnimationFrame(frameId);
   }, [isPlaying]);
 
-  // --- Ekran koordinatları üçün çevirmə ---
+  // ---- Ekran koordinatları üçün çevirmə ----
   const scale = 250;
-  const offsetX = 50;
-  const offsetY = 320;
+  const offsetX = 60;
+  const offsetY = 340;
 
   const toScreen = (p) => ({
     x: offsetX + p.x * scale,
     y: offsetY - p.y * scale,
   });
 
-  if (!config) {
-    return (
-      <div style={{ fontFamily: "sans-serif" }}>
-        <p>Bu φ₁ üçün mexanizm yığılmır (diskriminant &lt; 0).</p>
-        <input
-          type="range"
-          min="0"
-          max="360"
-          value={fi1Deg}
-          onChange={(e) => {
-            setFi1Deg(+e.target.value);
-            setTracePoints([]); // trayektoriyanı sıfırla
-          }}
-        />
-      </div>
-    );
+  const A = { x: 0, y: 0 };
+  const D = { x: xd, y: yd };
+  const Ap = toScreen(A);
+  const Dp = toScreen(D);
+
+  let B, C, E, f21, f31, Bp, Cp, Ep;
+  if (config) {
+    ({ B, C, E, f21, f31 } = config);
+    Bp = toScreen(B);
+    Cp = toScreen(C);
+    Ep = toScreen(E);
   }
 
-  const { A, B, C, D, E, f21, f31 } = config;
-
-  const Ap = toScreen(A);
-  const Bp = toScreen(B);
-  const Cp = toScreen(C);
-  const Dp = toScreen(D);
-  const Ep = toScreen(E);
-
   // trayektoriya üçün SVG nöqtələri
-  const tracePointsSvg = tracePoints
-    .map((p) => {
-      const s = toScreen(p);
-      return `${s.x},${s.y}`;
-    })
-    .join(" ");
+  const tracePointsSvg =
+    config &&
+    tracePoints
+      .map((p) => {
+        const s = toScreen(p);
+        return `${s.x},${s.y}`;
+      })
+      .join(" ");
+
+  // ---- input dəyişəndə trayektoriyanı sıfırlamaq üçün helper ----
+  const handleParamChange = (setter) => (e) => {
+    const value = parseFloat(e.target.value.replace(",", ".")) || 0;
+    setter(value);
+    setTracePoints([]);
+  };
 
   return (
-    <div
-      style={{
-        maxWidth: 1100,
-        margin: "0 auto",
-        fontFamily: "sans-serif",
-        display: "flex",
-        gap: 24,
-      }}
-    >
-      {/* Sol tərəf – mexanizm şəkli */}
-      <div style={{ flex: 2 }}>
-        <h2>Tapşırıq 10 – Dördbəndli oynaq mexanizmi (Variant 10)</h2>
-
-        <div style={{ marginBottom: 12 }}>
-          <label>
-            Krank bucağı φ₁ = {fi1Deg.toFixed(1)}°
-            <input
-              type="range"
-              min="0"
-              max="360"
-              step="1"
-              value={fi1Deg}
-              onChange={(e) => {
-                setFi1Deg(+e.target.value);
-                setTracePoints([]); // manuel dəyişəndə trayektoriyanı sıfırla
-              }}
-              style={{ width: "100%", display: "block", marginTop: 8 }}
-            />
-          </label>
-        </div>
-
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <button
-            onClick={() => setIsPlaying((p) => !p)}
-            style={{ padding: "6px 12px" }}
-          >
-            {isPlaying ? "Pause" : "Play"} (avto fırlanma)
-          </button>
-          <button
-            onClick={() => setTracePoints([])}
-            style={{ padding: "6px 12px" }}
-          >
-            Trayektoriyanı təmizlə
-          </button>
-        </div>
-
-        <svg
-          width={700}
-          height={380}
-          style={{ border: "1px solid #ccc", background: "#fdfdfd" }}
-        >
-          {/* Yer xətti */}
-          <line
-            x1={Ap.x - 20}
-            y1={Ap.y}
-            x2={Ap.x + 600}
-            y2={Ap.y}
-            stroke="#999"
-            strokeDasharray="4 4"
-          />
-
-          {/* Dayaq nöqtələri */}
-          <circle cx={Ap.x} cy={Ap.y} r={4} fill="#000" />
-          <text x={Ap.x - 10} y={Ap.y + 15} fontSize="12">
-            A
-          </text>
-
-          <circle cx={Dp.x} cy={Dp.y} r={4} fill="#000" />
-          <text x={Dp.x + 5} y={Dp.y - 5} fontSize="12">
-            D
-          </text>
-
-          {/* Çubuqlar */}
-          <line
-            x1={Ap.x}
-            y1={Ap.y}
-            x2={Bp.x}
-            y2={Bp.y}
-            stroke="#000"
-            strokeWidth={4}
-          />
-          <line
-            x1={Bp.x}
-            y1={Bp.y}
-            x2={Cp.x}
-            y2={Cp.y}
-            stroke="#000"
-            strokeWidth={4}
-          />
-          <line
-            x1={Cp.x}
-            y1={Cp.y}
-            x2={Dp.x}
-            y2={Dp.y}
-            stroke="#000"
-            strokeWidth={4}
-          />
-          <line
-            x1={Bp.x}
-            y1={Bp.y}
-            x2={Ep.x}
-            y2={Ep.y}
-            stroke="#000"
-            strokeWidth={3}
-          />
-
-          {/* Nöqtələr */}
-          <circle cx={Bp.x} cy={Bp.y} r={3} fill="#000" />
-          <text x={Bp.x - 10} y={Bp.y - 5} fontSize="12">
-            B
-          </text>
-
-          <circle cx={Cp.x} cy={Cp.y} r={3} fill="#000" />
-          <text x={Cp.x + 5} y={Cp.y + 15} fontSize="12">
-            C
-          </text>
-
-          <circle cx={Ep.x} cy={Ep.y} r={3} fill="#000" />
-          <text x={Ep.x + 5} y={Ep.y - 5} fontSize="12">
-            E
-          </text>
-
-          {/* E nöqtəsinin trayektoriyası */}
-          {tracePointsSvg && (
-            <polyline
-              points={tracePointsSvg}
-              fill="none"
-              stroke="#d33"
-              strokeWidth={1.5}
-            />
-          )}
-
-          {/* x ölçüsü */}
-          <line
-            x1={Ap.x}
-            y1={Ap.y + 40}
-            x2={Dp.x}
-            y2={Ap.y + 40}
-            stroke="#000"
-            markerStart="url(#arrowStart)"
-            markerEnd="url(#arrowEnd)"
-          />
-          <text
-            x={(Ap.x + Dp.x) / 2 - 10}
-            y={Ap.y + 55}
-            fontSize="12"
-          >
-            x
-          </text>
-
-          {/* y ölçüsü */}
-          <line
-            x1={Dp.x + 40}
-            y1={Dp.y}
-            x2={Dp.x + 40}
-            y2={Ap.y}
-            stroke="#000"
-            markerStart="url(#arrowStart)"
-            markerEnd="url(#arrowEnd)"
-          />
-          <text
-            x={Dp.x + 45}
-            y={(Dp.y + Ap.y) / 2}
-            fontSize="12"
-          >
-            y
-          </text>
-
-          {/* Ox markerləri */}
-          <defs>
-            <marker
-              id="arrowEnd"
-              markerWidth="6"
-              markerHeight="6"
-              refX="5"
-              refY="3"
-              orient="auto"
-            >
-              <path d="M0,0 L6,3 L0,6 z" />
-            </marker>
-            <marker
-              id="arrowStart"
-              markerWidth="6"
-              markerHeight="6"
-              refX="1"
-              refY="3"
-              orient="auto"
-            >
-              <path d="M6,0 L0,3 L6,6 z" />
-            </marker>
-          </defs>
-        </svg>
-      </div>
-
-      {/* Sağ panel – outputlar */}
-      <div
-        style={{
-          flex: 1,
-          border: "1px solid #ddd",
-          borderRadius: 8,
-          padding: 12,
-          background: "#fafafa",
-          fontSize: 14,
-        }}
-      >
-        <h3>Hesablanmış parametrlər</h3>
-        <div style={{ marginBottom: 8 }}>
-          <strong>Bucaqlar (dərəcə):</strong>
-          <ul>
-            <li>φ₁ (AB) = {fi1Deg.toFixed(2)}°</li>
-            <li>φ₂ (BC) = {(f21 * 180 / Math.PI).toFixed(2)}°</li>
-            <li>φ₃ (CD) = {(f31 * 180 / Math.PI).toFixed(2)}°</li>
-          </ul>
-        </div>
-
-        <div style={{ marginBottom: 8 }}>
-          <strong>Nöqtə koordinatları (m):</strong>
-          <ul>
-            <li>A(0, 0)</li>
-            <li>
-              B({B.x.toFixed(3)}, {B.y.toFixed(3)})
-            </li>
-            <li>
-              C({C.x.toFixed(3)}, {C.y.toFixed(3)})
-            </li>
-            <li>
-              D({D.x.toFixed(3)}, {D.y.toFixed(3)})
-            </li>
-            <li>
-              E({E.x.toFixed(3)}, {E.y.toFixed(3)})
-            </li>
-          </ul>
-        </div>
-
+    <div className="app-shell">
+      <header className="app-header">
         <div>
-          <strong>Trayektoriya haqqında:</strong>
-          <p>
-            E nöqtəsinin yadda saxlanmış nöqtə sayı:{" "}
-            {tracePoints.length}
-          </p>
-          <p style={{ fontSize: 12, color: "#555" }}>
-            Play düyməsinə basanda krank fırlanır, E nöqtəsinin
-            hərəkət yolu qırmızı xətt kimi çızılır. İstəsən "Trayektoriyanı
-            təmizlə" ilə sıfırlaya bilərsən.
+          <h1>Tapşırıq 10 – Dördbəndli Oynaq Mexanizmi</h1>
+          <p className="subtitle">
+            Variant 10 üçün vizual kinematik analiz. Parametrləri dəyiş, bucağı
+            fırlat və E nöqtəsinin trayektoriyasına bax.
           </p>
         </div>
-      </div>
+      </header>
+
+      <main className="app-main">
+        {/* Sol panel – mexanizm şəkli */}
+        <section className="panel panel-left">
+          <div className="controls-row">
+            <div className="control-block">
+              <label>
+                Krank bucağı φ₁:{" "}
+                <strong>{fi1Deg.toFixed(1)}°</strong>
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="360"
+                step="1"
+                value={fi1Deg}
+                onChange={(e) => {
+                  setFi1Deg(+e.target.value);
+                  setTracePoints([]);
+                }}
+              />
+            </div>
+
+            <div className="buttons">
+              <button
+                type="button"
+                className={`btn ${isPlaying ? "btn-secondary" : "btn-primary"}`}
+                onClick={() => setIsPlaying((p) => !p)}
+              >
+                {isPlaying ? "Pause" : "Play"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setTracePoints([])}
+              >
+                Trayektoriyanı təmizlə
+              </button>
+            </div>
+          </div>
+
+          <div className="canvas-wrapper">
+            <svg
+              width={700}
+              height={500}
+              className="mechanism-svg"
+            >
+              {/* Yer xətti */}
+              <line
+                x1={Ap.x - 20}
+                y1={Ap.y}
+                x2={Ap.x + 600}
+                y2={Ap.y}
+                className="ground-line"
+              />
+
+              {/* Dayaq nöqtələri */}
+              <circle cx={Ap.x} cy={Ap.y} r={4} className="joint" />
+              <text x={Ap.x - 12} y={Ap.y + 18} className="label">
+                A
+              </text>
+
+              <circle cx={Dp.x} cy={Dp.y} r={4} className="joint" />
+              <text x={Dp.x + 6} y={Dp.y - 6} className="label">
+                D
+              </text>
+
+              {/* Əsas çubuqlar yalnız konfiqurasiya olduqda */}
+              {config && (
+                <>
+                  <line
+                    x1={Ap.x}
+                    y1={Ap.y}
+                    x2={Bp.x}
+                    y2={Bp.y}
+                    className="link link-main"
+                  />
+                  <line
+                    x1={Bp.x}
+                    y1={Bp.y}
+                    x2={Cp.x}
+                    y2={Cp.y}
+                    className="link link-main"
+                  />
+                  <line
+                    x1={Cp.x}
+                    y1={Cp.y}
+                    x2={Dp.x}
+                    y2={Dp.y}
+                    className="link link-main"
+                  />
+                  <line
+                    x1={Bp.x}
+                    y1={Bp.y}
+                    x2={Ep.x}
+                    y2={Ep.y}
+                    className="link link-secondary"
+                  />
+
+                  {/* Nöqtələr */}
+                  <circle cx={Bp.x} cy={Bp.y} r={3} className="joint" />
+                  <text
+                    x={Bp.x - 10}
+                    y={Bp.y - 6}
+                    className="label"
+                  >
+                    B
+                  </text>
+
+                  <circle cx={Cp.x} cy={Cp.y} r={3} className="joint" />
+                  <text
+                    x={Cp.x + 6}
+                    y={Cp.y + 16}
+                    className="label"
+                  >
+                    C
+                  </text>
+
+                  <circle cx={Ep.x} cy={Ep.y} r={3} className="joint joint-E" />
+                  <text
+                    x={Ep.x + 6}
+                    y={Ep.y - 6}
+                    className="label"
+                  >
+                    E
+                  </text>
+                </>
+              )}
+
+              {/* E nöqtəsinin trayektoriyası */}
+              {tracePointsSvg && (
+                <polyline
+                  points={tracePointsSvg}
+                  className="trace"
+                />
+              )}
+
+              {/* x ölçüsü */}
+              <line
+                x1={Ap.x}
+                y1={Ap.y + 40}
+                x2={Dp.x}
+                y2={Ap.y + 40}
+                className="dimension-line"
+                markerStart="url(#arrowStart)"
+                markerEnd="url(#arrowEnd)"
+              />
+              <text
+                x={(Ap.x + Dp.x) / 2 - 10}
+                y={Ap.y + 56}
+                className="label"
+              >
+                x
+              </text>
+
+              {/* y ölçüsü */}
+              <line
+                x1={Dp.x + 40}
+                y1={Dp.y}
+                x2={Dp.x + 40}
+                y2={Ap.y}
+                className="dimension-line"
+                markerStart="url(#arrowStart)"
+                markerEnd="url(#arrowEnd)"
+              />
+              <text
+                x={Dp.x + 46}
+                y={(Dp.y + Ap.y) / 2}
+                className="label"
+              >
+                y
+              </text>
+
+              {/* Ox markerləri */}
+              <defs>
+                <marker
+                  id="arrowEnd"
+                  markerWidth="6"
+                  markerHeight="6"
+                  refX="5"
+                  refY="3"
+                  orient="auto"
+                >
+                  <path d="M0,0 L6,3 L0,6 z" />
+                </marker>
+                <marker
+                  id="arrowStart"
+                  markerWidth="6"
+                  markerHeight="6"
+                  refX="1"
+                  refY="3"
+                  orient="auto"
+                >
+                  <path d="M6,0 L0,3 L6,6 z" />
+                </marker>
+              </defs>
+
+              {!config && (
+                <text
+                  x={Ap.x + 120}
+                  y={Ap.y - 120}
+                  className="error-text"
+                >
+                  Bu parametrlər üçün mexanizm yığılmır (diskriminant &lt; 0)
+                </text>
+              )}
+            </svg>
+          </div>
+        </section>
+
+        {/* Sağ panel – input + outputlar */}
+        <section className="panel panel-right">
+          <h2 className="panel-title">Parametrlər və nəticələr</h2>
+
+          <div className="grid grid-2">
+            <div>
+              <h3 className="section-title">Giriş parametrləri</h3>
+              <div className="form-grid">
+                <label className="field">
+                  <span>l₁ = AB (m)</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={l1}
+                    onChange={handleParamChange(setL1)}
+                  />
+                </label>
+                <label className="field">
+                  <span>l₂ = BC (m)</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={l2}
+                    onChange={handleParamChange(setL2)}
+                  />
+                </label>
+                <label className="field">
+                  <span>l₃ = CD (m)</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={l3}
+                    onChange={handleParamChange(setL3)}
+                  />
+                </label>
+                <label className="field">
+                  <span>x (A → D) (m)</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={xd}
+                    onChange={handleParamChange(setXd)}
+                  />
+                </label>
+                <label className="field">
+                  <span>y (A → D) (m)</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={yd}
+                    onChange={handleParamChange(setYd)}
+                  />
+                </label>
+                <label className="field">
+                  <span>L_BE / L_BC</span>
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={lBERatio}
+                    onChange={handleParamChange(setLBERatio)}
+                  />
+                </label>
+                <label className="field">
+                  <span>∠(BC, BE) (°)</span>
+                  <input
+                    type="number"
+                    step="1"
+                    value={alfDeg}
+                    onChange={handleParamChange(setAlfDeg)}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="section-title">Hesablanmış nəticələr</h3>
+
+              {config ? (
+                <>
+                  <div className="result-block">
+                    <strong>Bucaqlar (dərəcə):</strong>
+                    <ul>
+                      <li>φ₁ (AB) = {fi1Deg.toFixed(2)}°</li>
+                      <li>
+                        φ₂ (BC) = {(f21 * 180 / Math.PI).toFixed(2)}°
+                      </li>
+                      <li>
+                        φ₃ (CD) = {(f31 * 180 / Math.PI).toFixed(2)}°
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div className="result-block">
+                    <strong>Nöqtə koordinatları (m):</strong>
+                    <ul>
+                      <li>A(0, 0)</li>
+                      <li>
+                        B({B.x.toFixed(3)}, {B.y.toFixed(3)})
+                      </li>
+                      <li>
+                        C({C.x.toFixed(3)}, {C.y.toFixed(3)})
+                      </li>
+                      <li>
+                        D({D.x.toFixed(3)}, {D.y.toFixed(3)})
+                      </li>
+                      <li>
+                        E({E.x.toFixed(3)}, {E.y.toFixed(3)})
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div className="result-block">
+                    <strong>Trayektoriya haqqında:</strong>
+                    <p>
+                      E nöqtəsinin yadda saxlanmış nöqtə sayı:{" "}
+                      <strong>{tracePoints.length}</strong>
+                    </p>
+                    <p className="hint">
+                      Play düyməsi ilə krank fırlanır, E nöqtəsinin hərəkət yolu
+                      qırmızı xətt kimi çəkilir.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <p className="error-text">
+                  Parametrləri elə seç ki, mexanizm yığıla bilsin (diskriminant
+                  ≥ 0 və l₂, l₃ ≠ 0).
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+      </main>
     </div>
   );
 }

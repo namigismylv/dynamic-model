@@ -3,18 +3,23 @@ import "./App.css";
 
 function App() {
   // ---- Mexanizm parametrləri (input olaraq dəyişən) ----
-  const [l1, setL1] = useState(0.22);      // AB
-  const [l2, setL2] = useState(1.52);      // BC
-  const [l3, setL3] = useState(0.5);       // CD
-  const [xd, setXd] = useState(1.5);       // D-nin A-dan üfüqi məsafəsi
-  const [yd, setYd] = useState(0.2);       // D-nin A-dan şaquli məsafəsi
-  const [lBERatio, setLBERatio] = useState(0.5); // L_BE / L_BC
-  const [alfDeg, setAlfDeg] = useState(30);      // BE ilə BC arasındakı bucaq (dərəcə)
+  const [l1, setL1] = useState("");      // AB
+  const [l2, setL2] = useState("");      // BC
+  const [l3, setL3] = useState("");       // CD
+  const [xd, setXd] = useState("");       // D-nin A-dan üfüqi məsafəsi
+  const [yd, setYd] = useState("");       // D-nin A-dan şaquli məsafəsi
+  const [lBERatio, setLBERatio] = useState(""); // L_BE / L_BC
+  const [alfDeg, setAlfDeg] = useState("");      // BE ilə BC arasındakı bucaq (dərəcə)
+  const [lCERatio, setLCERatio] = useState(""); // L_CE / L_BC
+  const [initialFi1Deg, setInitialFi1Deg] = useState(""); // Başlanğıc krank bucağı (input)
 
   // ---- Krank bucağı və animasiya ----
-  const [fi1Deg, setFi1Deg] = useState(30);
+  const [fi1Deg, setFi1Deg] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [tracePoints, setTracePoints] = useState([]); // E nöqtəsinin trayektoriyası
+  
+  // ---- Submitted state (form submitted və mexanizm göstərilməsi üçün) ----
+  const [submittedParams, setSubmittedParams] = useState(null);
 
   // ---- fi1 üçün kinematik hesab (C# kodundan port) ----
   function computeConfiguration(fi1, params) {
@@ -74,17 +79,11 @@ function App() {
   const fi1 = useMemo(() => (fi1Deg * Math.PI) / 180, [fi1Deg]);
 
   const config = useMemo(
-    () =>
-      computeConfiguration(fi1, {
-        l1,
-        l2,
-        l3,
-        xd,
-        yd,
-        lBERatio,
-        alfDeg,
-      }),
-    [fi1, l1, l2, l3, xd, yd, lBERatio, alfDeg]
+    () => {
+      if (!submittedParams) return null;
+      return computeConfiguration(fi1, submittedParams);
+    },
+    [fi1, submittedParams]
   );
 
   // ---- Trayektoriyanın yığılması (E nöqtəsi) ----
@@ -102,12 +101,15 @@ function App() {
 
   // ---- Sadə animasiya (φ1 avtomatik dövsün) ----
   useEffect(() => {
-    if (!isPlaying) return;
+    if (!isPlaying || !config) {
+      setIsPlaying(false);
+      return;
+    }
     let frameId;
 
     const step = () => {
       setFi1Deg((prev) => {
-        const next = prev + 0.5; // hər kadrda 2°
+        const next = prev + 0.5; // hər kadrda 0.5°
         return next >= 360 ? next - 360 : next;
       });
       frameId = requestAnimationFrame(step);
@@ -115,7 +117,7 @@ function App() {
 
     frameId = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frameId);
-  }, [isPlaying]);
+  }, [isPlaying, config]);
 
   // ---- Ekran koordinatları üçün çevirmə ----
   const scale = 250;
@@ -128,7 +130,7 @@ function App() {
   });
 
   const A = { x: 0, y: 0 };
-  const D = { x: xd, y: yd };
+  const D = submittedParams ? { x: submittedParams.xd, y: submittedParams.yd } : { x: 0, y: 0 };
   const Ap = toScreen(A);
   const Dp = toScreen(D);
 
@@ -152,9 +154,36 @@ function App() {
 
   // ---- input dəyişəndə trayektoriyanı sıfırlamaq üçün helper ----
   const handleParamChange = (setter) => (e) => {
-    const value = parseFloat(e.target.value.replace(",", ".")) || 0;
+    const value = e.target.value;
     setter(value);
+  };
+
+  // ---- Form submit handler ----
+  const handleSubmit = (e) => {
+    if (e) {
+      e.preventDefault();
+    }
+    const params = {
+      l1: parseFloat(l1) || 0,
+      l2: parseFloat(l2) || 0,
+      l3: parseFloat(l3) || 0,
+      xd: parseFloat(xd) || 0,
+      yd: parseFloat(yd) || 0,
+      lBERatio: parseFloat(lBERatio) || 0,
+      alfDeg: parseFloat(alfDeg) || 0,
+    };
+    setSubmittedParams(params);
+    // İstifadəçi tərəfindən daxil edilən krank bucağını təyin et
+    const crankAngle = parseFloat(initialFi1Deg) || 0;
+    setFi1Deg(crankAngle);
     setTracePoints([]);
+  };
+
+  // ---- Handle Enter key on input fields ----
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") {
+      handleSubmit();
+    }
   };
 
   return (
@@ -176,7 +205,7 @@ function App() {
             <div className="control-block">
               <label>
                 Krank bucağı φ₁:{" "}
-                <strong>{fi1Deg.toFixed(1)}°</strong>
+                <strong>{config ? fi1Deg.toFixed(1) : "--"}°</strong>
               </label>
               <input
                 type="range"
@@ -184,6 +213,7 @@ function App() {
                 max="360"
                 step="1"
                 value={fi1Deg}
+                disabled={!config}
                 onChange={(e) => {
                   setFi1Deg(+e.target.value);
                   setTracePoints([]);
@@ -196,6 +226,7 @@ function App() {
                 type="button"
                 className={`btn ${isPlaying ? "btn-secondary" : "btn-primary"}`}
                 onClick={() => setIsPlaying((p) => !p)}
+                disabled={!config}
               >
                 {isPlaying ? "Pause" : "Play"}
               </button>
@@ -203,6 +234,7 @@ function App() {
                 type="button"
                 className="btn btn-ghost"
                 onClick={() => setTracePoints([])}
+                disabled={!config}
               >
                 Trayektoriyanı təmizlə
               </button>
@@ -371,7 +403,7 @@ function App() {
                   y={Ap.y - 120}
                   className="error-text"
                 >
-                  Bu parametrlər üçün mexanizm yığılmır (diskriminant &lt; 0)
+                  {!submittedParams ? "Parametrləri daxil edin" : "Bu parametrlər üçün mexanizm yığılmır"}
                 </text>
               )}
             </svg>
@@ -385,7 +417,7 @@ function App() {
           <div className="grid grid-2">
             <div>
               <h3 className="section-title">Giriş parametrləri</h3>
-              <div className="form-grid">
+              <form onSubmit={handleSubmit} className="form-grid">
                 <label className="field">
                   <span>l₁ = AB (m)</span>
                   <input
@@ -393,6 +425,7 @@ function App() {
                     step="0.01"
                     value={l1}
                     onChange={handleParamChange(setL1)}
+                    onKeyDown={handleKeyDown}
                   />
                 </label>
                 <label className="field">
@@ -402,6 +435,7 @@ function App() {
                     step="0.01"
                     value={l2}
                     onChange={handleParamChange(setL2)}
+                    onKeyDown={handleKeyDown}
                   />
                 </label>
                 <label className="field">
@@ -411,6 +445,7 @@ function App() {
                     step="0.01"
                     value={l3}
                     onChange={handleParamChange(setL3)}
+                    onKeyDown={handleKeyDown}
                   />
                 </label>
                 <label className="field">
@@ -420,6 +455,7 @@ function App() {
                     step="0.01"
                     value={xd}
                     onChange={handleParamChange(setXd)}
+                    onKeyDown={handleKeyDown}
                   />
                 </label>
                 <label className="field">
@@ -429,6 +465,7 @@ function App() {
                     step="0.01"
                     value={yd}
                     onChange={handleParamChange(setYd)}
+                    onKeyDown={handleKeyDown}
                   />
                 </label>
                 <label className="field">
@@ -438,6 +475,7 @@ function App() {
                     step="0.05"
                     value={lBERatio}
                     onChange={handleParamChange(setLBERatio)}
+                    onKeyDown={handleKeyDown}
                   />
                 </label>
                 <label className="field">
@@ -447,9 +485,23 @@ function App() {
                     step="1"
                     value={alfDeg}
                     onChange={handleParamChange(setAlfDeg)}
+                    onKeyDown={handleKeyDown}
                   />
                 </label>
-              </div>
+                <label className="field">
+                  <span>Başlanğıc krank bucağı φ₁ (°)</span>
+                  <input
+                    type="number"
+                    step="1"
+                    value={initialFi1Deg}
+                    onChange={handleParamChange(setInitialFi1Deg)}
+                    onKeyDown={handleKeyDown}
+                  />
+                </label>
+                <button type="submit" className="btn btn-primary" style={{ gridColumn: "1 / -1", marginTop: "10px" }}>
+                  Mexanizmi göstər
+                </button>
+              </form>
             </div>
 
             <div>
@@ -503,8 +555,7 @@ function App() {
                 </>
               ) : (
                 <p className="error-text">
-                  Parametrləri elə seç ki, mexanizm yığıla bilsin (diskriminant
-                  ≥ 0 və l₂, l₃ ≠ 0).
+                  {submittedParams ? "Parametrləri elə seç ki, mexanizm yığıla bilsin (diskriminant ≥ 0 və l₂, l₃ ≠ 0)." : "Mexanizmi göstərmək üçün parametrləri daxil edin və formu göndərin."}
                 </p>
               )}
             </div>

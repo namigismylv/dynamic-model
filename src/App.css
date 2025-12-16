@@ -352,6 +352,10 @@ body {
     flex-direction: column;
     align-items: stretch;
   }
+  .control-block {
+    flex: none;
+    width: 100%;
+  }
 
   .canvas-wrapper {
     border-radius: 10px;

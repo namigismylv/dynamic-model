@@ -165,12 +165,19 @@ body {
   overflow: hidden;
   border: 1px solid #e5e7eb;
   background: radial-gradient(circle at top, #e5f0ff 0, #f9fafb 55%);
+  /* Responsive centering and enlargement of graph area */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 7 / 5; /* keep consistent proportions */
+  min-height: 420px; /* ensure adequate visible area on larger inputs */
 }
 
 .mechanism-svg {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%; /* fill wrapper's computed height */
 }
 
 .ground-line {

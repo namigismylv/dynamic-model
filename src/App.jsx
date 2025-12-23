@@ -3,21 +3,20 @@ import "./App.css";
 
 function App() {
   // ---- Mexanizm parametrləri (input olaraq dəyişən) ----
-  const [l1, setL1] = useState("");      // AB
-  const [l2, setL2] = useState("");      // BC
-  const [l3, setL3] = useState("");       // CD
-  const [xd, setXd] = useState("");       // D-nin A-dan üfüqi məsafəsi
-  const [yd, setYd] = useState("");       // D-nin A-dan şaquli məsafəsi
+  const [l1, setL1] = useState(""); // AB
+  const [l2, setL2] = useState(""); // BC
+  const [l3, setL3] = useState(""); // CD
+  const [xd, setXd] = useState(""); // D-nin A-dan üfüqi məsafəsi
+  const [yd, setYd] = useState(""); // D-nin A-dan şaquli məsafəsi
   const [lBERatio, setLBERatio] = useState(""); // L_BE / L_BC
-  const [alfDeg, setAlfDeg] = useState("");      // BE ilə BC arasındakı bucaq (dərəcə)
-  const [lCERatio, setLCERatio] = useState(""); // L_CE / L_BC
+  const [alfDeg, setAlfDeg] = useState(""); // BE ilə BC arasındakı bucaq (dərəcə)
   const [initialFi1Deg, setInitialFi1Deg] = useState(""); // Başlanğıc krank bucağı (input)
 
   // ---- Krank bucağı və animasiya ----
   const [fi1Deg, setFi1Deg] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [tracePoints, setTracePoints] = useState([]); // E nöqtəsinin trayektoriyası
-  
+
   // ---- Submitted state (form submitted və mexanizm göstərilməsi üçün) ----
   const [submittedParams, setSubmittedParams] = useState(null);
 
@@ -78,13 +77,10 @@ function App() {
 
   const fi1 = useMemo(() => (fi1Deg * Math.PI) / 180, [fi1Deg]);
 
-  const config = useMemo(
-    () => {
-      if (!submittedParams) return null;
-      return computeConfiguration(fi1, submittedParams);
-    },
-    [fi1, submittedParams]
-  );
+  const config = useMemo(() => {
+    if (!submittedParams) return null;
+    return computeConfiguration(fi1, submittedParams);
+  }, [fi1, submittedParams]);
 
   // ---- Trayektoriyanın yığılması (E nöqtəsi) ----
   useEffect(() => {
@@ -119,18 +115,63 @@ function App() {
     return () => cancelAnimationFrame(frameId);
   }, [isPlaying, config]);
 
-  // ---- Ekran koordinatları üçün çevirmə ----
-  const scale = 250;
-  const offsetX = 60;
-  const offsetY = 340;
+  // ---- Ekran koordinatları üçün çevirmə (auto-scale və mərkəzləmə) ----
+  const svgWidth = 700;
+  const svgHeight = 500;
+  const padding = 50; // daha geniş boşluq, oxlar və trayektoriya üçün
+
+  // Dünyadakı nöqtələr: A və D həmişə mövcuddur; B, C, E yalnız config olduqda
+  const A_world = { x: 0, y: 0 };
+  const D_world = submittedParams
+    ? { x: submittedParams.xd, y: submittedParams.yd }
+    : { x: 0, y: 0 };
+
+  const worldPoints = [A_world, D_world];
+  if (config) {
+    worldPoints.push(config.B, config.C, config.E);
+  }
+  // Trayektoriya nöqtələrini də bbox-a daxil et ki, polilin də içəridə qalsın
+  if (tracePoints.length) {
+    worldPoints.push(...tracePoints);
+  }
+
+  // Bounding box hesabla
+  let minX = Math.min(...worldPoints.map((p) => p.x));
+  let maxX = Math.max(...worldPoints.map((p) => p.x));
+  let minY = Math.min(...worldPoints.map((p) => p.y));
+  let maxY = Math.max(...worldPoints.map((p) => p.y));
+
+  const worldW = Math.max(1e-6, maxX - minX);
+  const worldH = Math.max(1e-6, maxY - minY);
+
+  // Oxlar, etiketlər və dairə radiusları üçün əlavə bufer
+  const marginWorld = Math.max(0.15 * Math.max(worldW, worldH), 0.5);
+  minX -= marginWorld;
+  maxX += marginWorld;
+  minY -= marginWorld;
+  maxY += marginWorld;
+
+  const paddedWorldW = Math.max(1e-6, maxX - minX);
+  const paddedWorldH = Math.max(1e-6, maxY - minY);
+
+  // Mövcud sahəyə sığışdırmaq üçün miqyas
+  const scaleX = (svgWidth - 2 * padding) / paddedWorldW;
+  const scaleY = (svgHeight - 2 * padding) / paddedWorldH;
+  const scale = Math.max(0.0001, Math.min(scaleX, scaleY));
+
+  // Mərkəzləmə üçün ofsetlər (SVG koordinatlarına)
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const offsetX = svgWidth / 2 - cx * scale;
+  const offsetY = svgHeight / 2 + cy * scale; // SVG-də y aşağı artır
 
   const toScreen = (p) => ({
     x: offsetX + p.x * scale,
     y: offsetY - p.y * scale,
   });
 
-  const A = { x: 0, y: 0 };
-  const D = submittedParams ? { x: submittedParams.xd, y: submittedParams.yd } : { x: 0, y: 0 };
+  const A = A_world;
+  const D = D_world;
   const Ap = toScreen(A);
   const Dp = toScreen(D);
 
@@ -243,15 +284,17 @@ function App() {
 
           <div className="canvas-wrapper">
             <svg
-              width={700}
-              height={500}
+              width={svgWidth}
+              height={svgHeight}
               className="mechanism-svg"
+              viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+              preserveAspectRatio="xMidYMid meet"
             >
               {/* Yer xətti */}
               <line
-                x1={Ap.x - 20}
+                x1={padding}
                 y1={Ap.y}
-                x2={Ap.x + 600}
+                x2={svgWidth - padding}
                 y2={Ap.y}
                 className="ground-line"
               />
@@ -301,29 +344,17 @@ function App() {
 
                   {/* Nöqtələr */}
                   <circle cx={Bp.x} cy={Bp.y} r={3} className="joint" />
-                  <text
-                    x={Bp.x - 10}
-                    y={Bp.y - 6}
-                    className="label"
-                  >
+                  <text x={Bp.x - 10} y={Bp.y - 6} className="label">
                     B
                   </text>
 
                   <circle cx={Cp.x} cy={Cp.y} r={3} className="joint" />
-                  <text
-                    x={Cp.x + 6}
-                    y={Cp.y + 16}
-                    className="label"
-                  >
+                  <text x={Cp.x + 6} y={Cp.y + 16} className="label">
                     C
                   </text>
 
                   <circle cx={Ep.x} cy={Ep.y} r={3} className="joint joint-E" />
-                  <text
-                    x={Ep.x + 6}
-                    y={Ep.y - 6}
-                    className="label"
-                  >
+                  <text x={Ep.x + 6} y={Ep.y - 6} className="label">
                     E
                   </text>
                 </>
@@ -331,10 +362,7 @@ function App() {
 
               {/* E nöqtəsinin trayektoriyası */}
               {tracePointsSvg && (
-                <polyline
-                  points={tracePointsSvg}
-                  className="trace"
-                />
+                <polyline points={tracePointsSvg} className="trace" />
               )}
 
               {/* x ölçüsü */}
@@ -347,11 +375,7 @@ function App() {
                 markerStart="url(#arrowStart)"
                 markerEnd="url(#arrowEnd)"
               />
-              <text
-                x={(Ap.x + Dp.x) / 2 - 10}
-                y={Ap.y + 56}
-                className="label"
-              >
+              <text x={(Ap.x + Dp.x) / 2 - 10} y={Ap.y + 56} className="label">
                 x
               </text>
 
@@ -365,11 +389,7 @@ function App() {
                 markerStart="url(#arrowStart)"
                 markerEnd="url(#arrowEnd)"
               />
-              <text
-                x={Dp.x + 46}
-                y={(Dp.y + Ap.y) / 2}
-                className="label"
-              >
+              <text x={Dp.x + 46} y={(Dp.y + Ap.y) / 2} className="label">
                 y
               </text>
 
@@ -398,12 +418,10 @@ function App() {
               </defs>
 
               {!config && (
-                <text
-                  x={Ap.x + 120}
-                  y={Ap.y - 120}
-                  className="error-text"
-                >
-                  {!submittedParams ? "Parametrləri daxil edin" : "Bu parametrlər üçün mexanizm yığılmır"}
+                <text x={Ap.x + 120} y={Ap.y - 120} className="error-text">
+                  {!submittedParams
+                    ? "Parametrləri daxil edin"
+                    : "Bu parametrlər üçün mexanizm yığılmır"}
                 </text>
               )}
             </svg>
@@ -498,7 +516,11 @@ function App() {
                     onKeyDown={handleKeyDown}
                   />
                 </label>
-                <button type="submit" className="btn btn-primary" style={{ gridColumn: "1 / -1", marginTop: "10px" }}>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  style={{ gridColumn: "1 / -1", marginTop: "10px" }}
+                >
                   Mexanizmi göstər
                 </button>
               </form>
@@ -513,12 +535,8 @@ function App() {
                     <strong>Bucaqlar (dərəcə):</strong>
                     <ul>
                       <li>φ₁ (AB) = {fi1Deg.toFixed(2)}°</li>
-                      <li>
-                        φ₂ (BC) = {(f21 * 180 / Math.PI).toFixed(2)}°
-                      </li>
-                      <li>
-                        φ₃ (CD) = {(f31 * 180 / Math.PI).toFixed(2)}°
-                      </li>
+                      <li>φ₂ (BC) = {((f21 * 180) / Math.PI).toFixed(2)}°</li>
+                      <li>φ₃ (CD) = {((f31 * 180) / Math.PI).toFixed(2)}°</li>
                     </ul>
                   </div>
 
@@ -555,7 +573,9 @@ function App() {
                 </>
               ) : (
                 <p className="error-text">
-                  {submittedParams ? "Parametrləri elə seç ki, mexanizm yığıla bilsin (diskriminant ≥ 0 və l₂, l₃ ≠ 0)." : "Mexanizmi göstərmək üçün parametrləri daxil edin və formu göndərin."}
+                  {submittedParams
+                    ? "Parametrləri elə seç ki, mexanizm yığıla bilsin (diskriminant ≥ 0 və l₂, l₃ ≠ 0)."
+                    : "Mexanizmi göstərmək üçün parametrləri daxil edin və formu göndərin."}
                 </p>
               )}
             </div>
